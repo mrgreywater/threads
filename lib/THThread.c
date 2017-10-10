@@ -16,8 +16,8 @@
 
 typedef HANDLE pthread_t;
 typedef DWORD pthread_attr_t;
-typedef HANDLE pthread_mutex_t;
-typedef HANDLE pthread_cond_t;
+typedef CRITICAL_SECTION pthread_mutex_t;
+typedef CONDITION_VARIABLE pthread_cond_t;
 typedef HANDLE pthread_mutexattr_t;
 typedef HANDLE pthread_condattr_t;
 typedef unsigned ( __stdcall *THREAD_FUNCTION )( void * );
@@ -39,48 +39,87 @@ static int pthread_join(pthread_t thread, void **value_ptr)
 static int pthread_mutex_init(pthread_mutex_t *restrict mutex,
                               const pthread_mutexattr_t *restrict attr)
 {
-  *mutex = CreateMutex(NULL, FALSE, NULL);
-  return (int)(*mutex == NULL);
+  if (mutex) {
+    InitializeCriticalSection(mutex);
+    return 0;
+  }
+  return EINVAL;
 }
 
 static int pthread_mutex_lock(pthread_mutex_t *mutex)
 {
-  return WaitForSingleObject(*mutex, INFINITE) != 0;
+  if (mutex) {
+    EnterCriticalSection(mutex);
+    return 0;
+  }
+  return EINVAL;
 }
 
 static int pthread_mutex_unlock(pthread_mutex_t *mutex)
 {
-  return ReleaseMutex(*mutex) == 0;
+  if (mutex) {
+    LeaveCriticalSection(mutex);
+    return 0;
+  }
+  return EINVAL;
 }
 
 static int pthread_mutex_destroy(pthread_mutex_t *mutex)
 {
-  return CloseHandle(*mutex) == 0;
+  if (mutex) {
+    DeleteCriticalSection(mutex);
+    return 0;
+  }
+  return EINVAL;
 }
 
 static int pthread_cond_init(pthread_cond_t *restrict cond,
                              const pthread_condattr_t *restrict attr)
 {
-  *cond = CreateEvent(NULL, FALSE, FALSE, NULL);
-  return (int)(*cond == NULL);
+  if (cond) {
+    InitializeConditionVariable(cond);
+    return 0;
+  }
+  return EINVAL;
 }
 
 static int pthread_cond_wait(pthread_cond_t *restrict cond,
                              pthread_mutex_t *restrict mutex)
 {
-  SignalObjectAndWait(*mutex, *cond, INFINITE, FALSE);
-  return WaitForSingleObject(*mutex, INFINITE) != 0;
+  if (cond && mutex) {
+    if (SleepConditionVariableCS(cond, mutex, INFINITE)) {
+      return 0;
+    }
+    if (GetLastError() == ERROR_TIMEOUT) {
+      return ETIMEDOUT;
+    }
+    return EOTHER;
+  }
+  return EINVAL;
 }
 
 static int pthread_cond_destroy(pthread_cond_t *cond)
 {
-  return CloseHandle(*cond) == 0;
+  return cond == 0 ? EINVAL : 0;
 }
 
 int pthread_cond_signal(pthread_cond_t *cond)
 {
-  return SetEvent(*cond) == 0;
+  if (cond) {
+    WakeConditionVariable(cond);
+    return 0;
+  }
+  return EINVAL;
 }
+
+int pthread_cond_broadcast(pthread_cond_t *cond)
+{
+  if (cond) {
+    WakeAllConditionVariable(cond);
+    return 0;
+  }
+  return EINVAL;
+};
 
 #else
 #error no thread system available

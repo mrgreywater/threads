@@ -2,13 +2,21 @@
 #include <stdlib.h>
 #include <luaT.h>
 #include <string.h>
+#ifndef LIBTHREAD_STATIC_IMPORT
 #include <dlfcn.h>
+#endif
 
 #include "THThread.h"
 #include "luaTHRD.h"
 
 #include <lua.h>
 #include <lualib.h>
+
+#define luaL_checkaddr(L,n)     ((AddressType)luaL_checkinteger(L, (n)))
+
+#ifdef LIBTHREAD_STATIC_IMPORT
+LUALIB_API void* THThread_main(void *arg);
+#endif
 
 static int thread_new(lua_State *L)
 {
@@ -19,13 +27,14 @@ static int thread_new(lua_State *L)
   if(!code_dup)
     luaL_error(L, "threads: out of memory");
   memcpy(code_dup, code, len+1);
-
+#ifndef LIBTHREAD_STATIC_IMPORT
 #ifdef _MSC_VER
 #define snprintf _snprintf
 #define LIBTHREADSMAIN "threadsmain.dll"
 #else
 #define LIBTHREADSMAIN "libthreadsmain.so"
 #endif
+
 
 #ifdef RTLD_NODELETE /* platforms like android dont seem to support this */
   void* lib = dlopen(LIBTHREADSMAIN, RTLD_LAZY|RTLD_LOCAL|RTLD_NODELETE);
@@ -36,12 +45,18 @@ static int thread_new(lua_State *L)
     free(code_dup);
     luaL_error(L, "threads: dlopen: %s", dlerror());
   }
+#endif
 
-  void* (*thread_main)(void*) = dlsym(lib, "THThread_main");
+  void* (*thread_main)(void*);
+#ifdef LIBTHREAD_STATIC_IMPORT
+  thread_main = &THThread_main;
+#else
+  thread_main = dlsym(lib, "THThread_main");
   if (!thread_main) {
-    free(code_dup);
-    luaL_error(L, "threads: dlsym: %s", dlerror());
+      free(code_dup);
+      luaL_error(L, "threads: dlsym: %s", dlerror());
   }
+#endif
 
   thread = THThread_new(thread_main, (void*)code_dup);
   if(!thread) {
